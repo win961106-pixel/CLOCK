@@ -3,76 +3,259 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>拾音時鐘控制面板</title>
+  <title>CyberPixel 時鐘控制中心</title>
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  
   <style>
-    body { font-family: sans-serif; padding: 20px; background-color: #222; color: white; }
-    .card { background: #333; padding: 15px; border-radius: 8px; margin-bottom: 15px; }
-    input[type=range] { width: 100%; }
-    button { padding: 10px; margin: 5px; cursor: pointer; border-radius: 5px; border: none; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      padding: 20px;
+      background-color: #121212; /* 深色背景 */
+      color: #e0e0e0;
+      text-align: center;
+    }
+    h2 { color: #00d2ff; text-shadow: 0 0 10px #00d2ff; margin-bottom: 30px;}
+    
+    .container {
+      max-width: 500px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background: #1e1e1e;
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+      border: 1px solid #333;
+    }
+
+    h3 { margin-top: 0; color: #aaa; font-size: 1rem; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* 狀態顯示區 */
+    .status-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+    .status-box {
+      background: #252525;
+      padding: 15px;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: all 0.3s;
+    }
+    .status-icon { font-size: 24px; margin-bottom: 8px; color: #555; }
+    .status-text { font-size: 14px; color: #777; font-weight: bold; }
+    
+    /* 狀態啟動時的樣式 (JS控制) */
+    .active .status-icon { color: #00ff00; text-shadow: 0 0 8px #00ff00; }
+    .active .status-text { color: #00ff00; }
+
+    /* 電腦開機按鈕 */
+    .pc-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, #ff416c, #ff4b2b);
+      color: white;
+      border: none;
+      border-radius: 50px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 0 15px rgba(255, 75, 43, 0.4);
+      transition: transform 0.1s;
+    }
+    .pc-btn:active { transform: scale(0.95); }
+
+    /* 調色盤置中 */
+    #color-picker-container {
+      display: flex;
+      justify-content: center;
+      margin-top: 10px;
+    }
+
+    /* 滑桿樣式 */
+    input[type=range] {
+      width: 100%;
+      margin: 10px 0;
+      accent-color: #00d2ff;
+    }
+
+    /* 紅外線遙控按鈕群 */
+    .ir-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .ir-btn {
+      background: #333;
+      color: white;
+      border: 1px solid #444;
+      padding: 12px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .ir-btn:hover { background: #444; }
+    .ir-btn i { margin-right: 5px; }
+
   </style>
 </head>
 <body>
 
-  <h2>🎛️ 拾音時鐘控制面板</h2>
+  <div class="container">
+    <h2><i class="fas fa-clock"></i> CyberClock Control</h2>
 
-  <div class="card">
-    <h3>🎨 時鐘與介面顏色</h3>
-    <input type="color" id="colorPicker" value="#ffffff" onchange="sendColor()">
-  </div>
+    <div class="card">
+      <h3>Device Status</h3>
+      <div class="status-grid">
+        <div class="status-box" id="status-tv">
+          <i class="fas fa-tv status-icon"></i>
+          <span class="status-text">TV: OFF</span>
+        </div>
+        <div class="status-box" id="status-speaker">
+          <i class="fas fa-volume-up status-icon"></i>
+          <span class="status-text">Speaker: OFF</span>
+        </div>
+      </div>
+    </div>
 
-  <div class="card">
-    <h3>🎚️ 靈敏度調整</h3>
-    <label>高音 (High): <span id="valHigh">1.0</span></label>
-    <input type="range" id="sensHigh" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('high', this.value)">
-    
-    <label>中音 (Mid): <span id="valMid">1.0</span></label>
-    <input type="range" id="sensMid" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('mid', this.value)">
-    
-    <label>低音 (Low): <span id="valLow">1.0</span></label>
-    <input type="range" id="sensLow" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('low', this.value)">
-  </div>
+    <div class="card">
+      <h3>PC Power Control</h3>
+      <button class="pc-btn" onclick="triggerPC()">
+        <i class="fas fa-power-off"></i> 喚醒電腦 (Wake PC)
+      </button>
+    </div>
 
-  <div class="card">
-    <h3>✨ 音頻動畫樣式</h3>
-    <button onclick="sendStyle(0)">0: 經典漸層</button>
-    <button onclick="sendStyle(1)">1: 峰值掉落</button>
-    <button onclick="sendStyle(2)">2: 中心對稱</button>
-    <button onclick="sendStyle(3)">3: 音浪擴散</button>
+    <div class="card">
+      <h3>Color & Style</h3>
+      <div id="color-picker-container"></div>
+      <p style="font-size: 12px; color: #666;">拖曳圓環改變顏色，下方滑桿調整亮度</p>
+    </div>
+
+    <div class="card">
+      <h3>Audio Sensitivity</h3>
+      <label>高音 (Treble)</label>
+      <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('high', this.value)">
+      
+      <label>中音 (Mid)</label>
+      <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('mid', this.value)">
+      
+      <label>低音 (Bass)</label>
+      <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('low', this.value)">
+    </div>
+
+    <div class="card">
+      <h3>IR Control & Visuals</h3>
+      <div class="ir-grid">
+        <button class="ir-btn" onclick="sendIR('tv_power')"><i class="fas fa-tv"></i> TV Power</button>
+        <button class="ir-btn" onclick="sendIR('sp_power')"><i class="fas fa-power-off"></i> Speaker</button>
+        <button class="ir-btn" onclick="sendStyle(0)">🌈 漸層樣式</button>
+        <button class="ir-btn" onclick="sendStyle(1)">💧 溶解樣式</button>
+      </div>
+    </div>
+
   </div>
 
   <script>
-    // 連線到免費的 HiveMQ 公共 Broker (使用 WebSocket 協定，Port 是 8000)
+    // ================= MQTT 設定 =================
+    // 連線到公共 Broker (HiveMQ)
     const client = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
+    // 訂閱的主題 (用來接收 ESP32 回傳的狀態)
+    const TOPIC_STATUS_TV = "esp32/status/tv";
+    const TOPIC_STATUS_SP = "esp32/status/speaker";
+
+    // 發布的主題 (用來控制 ESP32)
+    const TOPIC_COLOR_R = "esp32/color/r";
+    const TOPIC_COLOR_G = "esp32/color/g";
+    const TOPIC_COLOR_B = "esp32/color/b";
+    const TOPIC_PC_WAKE = "esp32/control/pc";
+    const TOPIC_IR_SEND = "esp32/control/ir";
+
+    // ================= 連線處理 =================
     client.on('connect', function () {
-      console.log('已連線到 MQTT Broker!');
-      alert("連線成功！可以開始控制了。");
+      console.log('MQTT Connected!');
+      // 訂閱狀態更新
+      client.subscribe(TOPIC_STATUS_TV);
+      client.subscribe(TOPIC_STATUS_SP);
     });
 
-    // 傳送顏色 (將 HEX 轉換為 R, G, B 分開傳送)
-    function sendColor() {
-      const hex = document.getElementById('colorPicker').value;
-      const r = parseInt(hex.slice(1, 3), 16);
-      const g = parseInt(hex.slice(3, 5), 16);
-      const b = parseInt(hex.slice(5, 7), 16);
+    // ================= 接收訊息 (更新 UI 狀態) =================
+    client.on('message', function (topic, message) {
+      const msg = message.toString();
       
-      client.publish('esp32/color/r', r.toString());
-      client.publish('esp32/color/g', g.toString());
-      client.publish('esp32/color/b', b.toString());
+      if (topic === TOPIC_STATUS_TV) {
+        updateStatusUI('status-tv', msg === '1' || msg === 'ON');
+      } else if (topic === TOPIC_STATUS_SP) {
+        updateStatusUI('status-speaker', msg === '1' || msg === 'ON');
+      }
+    });
+
+    function updateStatusUI(elementId, isOn) {
+      const el = document.getElementById(elementId);
+      const textSpan = el.querySelector('.status-text');
+      if (isOn) {
+        el.classList.add('active');
+        textSpan.innerText = textSpan.innerText.split(':')[0] + ": ON";
+      } else {
+        el.classList.remove('active');
+        textSpan.innerText = textSpan.innerText.split(':')[0] + ": OFF";
+      }
     }
 
-    // 傳送靈敏度
+    // ================= 調色盤設定 (iro.js) =================
+    var colorPicker = new iro.ColorPicker("#color-picker-container", {
+      width: 250,              // 圓盤大小
+      color: "#ffffff",        // 初始顏色
+      borderWidth: 2,
+      borderColor: "#fff",
+      layout: [
+        { component: iro.ui.Wheel }, // 圓形色盤
+        { component: iro.ui.Slider, options: { sliderType: 'value' } } // 亮度拉桿
+      ]
+    });
+
+    // 監聽顏色改變事件 (放開滑鼠才傳送，避免 MQTT 塞車)
+    colorPicker.on('input:end', function(color) {
+      const rgb = color.rgb;
+      console.log("Color sent:", rgb);
+      client.publish(TOPIC_COLOR_R, rgb.r.toString());
+      client.publish(TOPIC_COLOR_G, rgb.g.toString());
+      client.publish(TOPIC_COLOR_B, rgb.b.toString());
+    });
+
+    // ================= 控制指令發送 =================
+    
+    // 電腦開機
+    function triggerPC() {
+      if(confirm("確定要喚醒電腦嗎？")) {
+        client.publish(TOPIC_PC_WAKE, "ON");
+      }
+    }
+
+    // 發送靈敏度
     function sendSens(band, value) {
-      document.getElementById('val' + band.charAt(0).toUpperCase() + band.slice(1)).innerText = value;
       client.publish('esp32/sens/' + band, value.toString());
     }
 
-    // 傳送樣式
+    // 發送樣式
     function sendStyle(styleNum) {
       client.publish('esp32/audio/style', styleNum.toString());
     }
-  </script>
 
+    // 發送紅外線指令 (模擬遙控器)
+    function sendIR(command) {
+      // 這裡傳送純字串指令，ESP32 收到後再判斷要發射哪個 HEX 碼
+      client.publish(TOPIC_IR_SEND, command);
+    }
+
+  </script>
 </body>
 </html>
