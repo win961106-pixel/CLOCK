@@ -12,98 +12,52 @@
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
       padding: 20px;
-      background-color: #121212; /* 深色背景 */
+      background-color: #121212; 
       color: #e0e0e0;
       text-align: center;
     }
     h2 { color: #00d2ff; text-shadow: 0 0 10px #00d2ff; margin-bottom: 30px;}
     
-    .container {
-      max-width: 500px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-    }
-
+    .container { max-width: 500px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
     .card {
-      background: #1e1e1e;
-      padding: 20px;
-      border-radius: 15px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
-      border: 1px solid #333;
+      background: #1e1e1e; padding: 20px; border-radius: 15px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #333;
     }
-
     h3 { margin-top: 0; color: #aaa; font-size: 1rem; text-transform: uppercase; letter-spacing: 1px; }
 
     /* 狀態顯示區 */
-    .status-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-    }
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
     .status-box {
-      background: #252525;
-      padding: 15px;
-      border-radius: 10px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      transition: all 0.3s;
+      background: #252525; padding: 15px; border-radius: 10px;
+      display: flex; flex-direction: column; align-items: center; transition: all 0.3s;
     }
     .status-icon { font-size: 24px; margin-bottom: 8px; color: #555; }
     .status-text { font-size: 14px; color: #777; font-weight: bold; }
-    
-    /* 狀態啟動時的樣式 (JS控制) */
     .active .status-icon { color: #00ff00; text-shadow: 0 0 8px #00ff00; }
     .active .status-text { color: #00ff00; }
 
     /* 電腦開機按鈕 */
     .pc-btn {
-      width: 100%;
-      padding: 15px;
-      background: linear-gradient(135deg, #ff416c, #ff4b2b);
-      color: white;
-      border: none;
-      border-radius: 50px;
-      font-size: 18px;
-      font-weight: bold;
-      cursor: pointer;
-      box-shadow: 0 0 15px rgba(255, 75, 43, 0.4);
+      width: 100%; padding: 15px; background: linear-gradient(135deg, #ff416c, #ff4b2b);
+      color: white; border: none; border-radius: 50px; font-size: 18px;
+      font-weight: bold; cursor: pointer; box-shadow: 0 0 15px rgba(255, 75, 43, 0.4);
       transition: transform 0.1s;
     }
     .pc-btn:active { transform: scale(0.95); }
 
     /* 調色盤置中 */
-    #color-picker-container {
-      display: flex;
-      justify-content: center;
-      margin-top: 10px;
-    }
+    #color-picker-container { display: flex; justify-content: center; margin-top: 10px; }
+    input[type=range] { width: 100%; margin: 10px 0; accent-color: #00d2ff; }
 
-    /* 滑桿樣式 */
-    input[type=range] {
-      width: 100%;
-      margin: 10px 0;
-      accent-color: #00d2ff;
-    }
-
-    /* 紅外線遙控按鈕群 */
-    .ir-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
+    /* 紅外線與樣式按鈕群 */
+    .ir-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
     .ir-btn {
-      background: #333;
-      color: white;
-      border: 1px solid #444;
-      padding: 12px;
-      border-radius: 8px;
-      cursor: pointer;
+      background: #333; color: white; border: 1px solid #444;
+      padding: 12px; border-radius: 8px; cursor: pointer; transition: 0.2s;
     }
-    .ir-btn:hover { background: #444; }
+    .ir-btn:hover { background: #555; border-color: #00d2ff; }
     .ir-btn i { margin-right: 5px; }
+    .style-title { color: #888; font-size: 14px; margin: 15px 0 10px 0; border-top: 1px solid #444; padding-top: 15px;}
 
   </style>
 </head>
@@ -134,68 +88,52 @@
     </div>
 
     <div class="card">
-      <h3>Color & Style</h3>
+      <h3>Color & Brightness</h3>
       <div id="color-picker-container"></div>
-      <p style="font-size: 12px; color: #666;">拖曳圓環改變顏色，下方滑桿調整亮度</p>
     </div>
 
     <div class="card">
       <h3>Audio Sensitivity</h3>
       <label>高音 (Treble)</label>
       <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('high', this.value)">
-      
       <label>中音 (Mid)</label>
       <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('mid', this.value)">
-      
       <label>低音 (Bass)</label>
       <input type="range" min="0.1" max="3.0" step="0.1" value="1.0" onchange="sendSens('low', this.value)">
     </div>
 
     <div class="card">
       <h3>IR Control & Visuals</h3>
+      
       <div class="ir-grid">
         <button class="ir-btn" onclick="sendIR('tv_power')"><i class="fas fa-tv"></i> TV Power</button>
-        <button class="ir-btn" onclick="sendIR('sp_power')"><i class="fas fa-power-off"></i> Speaker</button>
-        <button class="ir-btn" onclick="sendStyle(0)">🌈 漸層樣式</button>
-        <button class="ir-btn" onclick="sendStyle(1)">💧 溶解樣式</button>
+        <button class="ir-btn" onclick="sendIR('sp_power')"><i class="fas fa-volume-up"></i> Speaker</button>
+      </div>
+
+      <div class="style-title"><i class="fas fa-music"></i> 音頻動畫樣式 (Audio Styles)</div>
+      <div class="ir-grid">
+        <button class="ir-btn" onclick="sendStyle(0)">🌈 經典漸層</button>
+        <button class="ir-btn" onclick="sendStyle(1)">☄️ 峰值掉落</button>
+        <button class="ir-btn" onclick="sendStyle(2)">🪞 中心對稱</button>
+        <button class="ir-btn" onclick="sendStyle(3)">💨 音浪擴散</button>
       </div>
     </div>
 
   </div>
 
   <script>
-    // ================= MQTT 設定 =================
-    // 連線到公共 Broker (HiveMQ)
     const client = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
-    // 訂閱的主題 (用來接收 ESP32 回傳的狀態)
-    const TOPIC_STATUS_TV = "esp32/status/tv";
-    const TOPIC_STATUS_SP = "esp32/status/speaker";
-
-    // 發布的主題 (用來控制 ESP32)
-    const TOPIC_COLOR_R = "esp32/color/r";
-    const TOPIC_COLOR_G = "esp32/color/g";
-    const TOPIC_COLOR_B = "esp32/color/b";
-    const TOPIC_PC_WAKE = "esp32/control/pc";
-    const TOPIC_IR_SEND = "esp32/control/ir";
-
-    // ================= 連線處理 =================
     client.on('connect', function () {
       console.log('MQTT Connected!');
-      // 訂閱狀態更新
-      client.subscribe(TOPIC_STATUS_TV);
-      client.subscribe(TOPIC_STATUS_SP);
+      client.subscribe("esp32/status/tv");
+      client.subscribe("esp32/status/speaker");
     });
 
-    // ================= 接收訊息 (更新 UI 狀態) =================
     client.on('message', function (topic, message) {
       const msg = message.toString();
-      
-      if (topic === TOPIC_STATUS_TV) {
-        updateStatusUI('status-tv', msg === '1' || msg === 'ON');
-      } else if (topic === TOPIC_STATUS_SP) {
-        updateStatusUI('status-speaker', msg === '1' || msg === 'ON');
-      }
+      if (topic === "esp32/status/tv") updateStatusUI('status-tv', msg === '1' || msg === 'ON');
+      else if (topic === "esp32/status/speaker") updateStatusUI('status-speaker', msg === '1' || msg === 'ON');
     });
 
     function updateStatusUI(elementId, isOn) {
@@ -210,52 +148,35 @@
       }
     }
 
-    // ================= 調色盤設定 (iro.js) =================
+    // 調色盤設定 (調整為接近 App 的樣式)
     var colorPicker = new iro.ColorPicker("#color-picker-container", {
-      width: 250,              // 圓盤大小
-      color: "#ffffff",        // 初始顏色
-      borderWidth: 2,
-      borderColor: "#fff",
+      width: 220,
+      color: "#ffffff",
       layout: [
-        { component: iro.ui.Wheel }, // 圓形色盤
-        { component: iro.ui.Slider, options: { sliderType: 'value' } } // 亮度拉桿
+        { component: iro.ui.Wheel }, // 純色相圓環
+        { component: iro.ui.Slider, options: { sliderType: 'value', margin: 20 } } // 獨立的亮度拉桿
       ]
     });
 
-    // 監聽顏色改變事件 (放開滑鼠才傳送，避免 MQTT 塞車)
     colorPicker.on('input:end', function(color) {
       const rgb = color.rgb;
-      console.log("Color sent:", rgb);
-      client.publish(TOPIC_COLOR_R, rgb.r.toString());
-      client.publish(TOPIC_COLOR_G, rgb.g.toString());
-      client.publish(TOPIC_COLOR_B, rgb.b.toString());
+      client.publish("esp32/color/r", rgb.r.toString());
+      client.publish("esp32/color/g", rgb.g.toString());
+      client.publish("esp32/color/b", rgb.b.toString());
     });
 
-    // ================= 控制指令發送 =================
-    
-    // 電腦開機
     function triggerPC() {
-      if(confirm("確定要喚醒電腦嗎？")) {
-        client.publish(TOPIC_PC_WAKE, "ON");
-      }
+      if(confirm("確定要喚醒電腦嗎？")) client.publish("esp32/control/pc", "ON");
     }
-
-    // 發送靈敏度
     function sendSens(band, value) {
       client.publish('esp32/sens/' + band, value.toString());
     }
-
-    // 發送樣式
     function sendStyle(styleNum) {
       client.publish('esp32/audio/style', styleNum.toString());
     }
-
-    // 發送紅外線指令 (模擬遙控器)
     function sendIR(command) {
-      // 這裡傳送純字串指令，ESP32 收到後再判斷要發射哪個 HEX 碼
-      client.publish(TOPIC_IR_SEND, command);
+      client.publish("esp32/control/ir", command);
     }
-
   </script>
 </body>
 </html>
