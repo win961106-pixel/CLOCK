@@ -1,496 +1,143 @@
-#define FASTLED_INTERNAL 
-
-#include <WiFi.h>
-#include <PubSubClient.h>
-#include <NeoPixelBus.h> 
-#include <FastLED.h>     
-#include <arduinoFFT.h>  
-#include <SinricPro.h>   
-#include <SinricProSwitch.h>
-#include <IRremoteESP8266.h>
-#include <IRsend.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
-
-// ================== 網路與金鑰設定 ==================
-#define WIFI_SSID        "16-3AP"
-#define WIFI_PASSWORD    "0935131327"
-#define MQTT_SERVER      "broker.emqx.io"
-#define MQTT_PORT        1883
-
-#define APP_KEY          "3840c2b8-98e5-4c11-b3dd-d0300357b38e"
-#define APP_SECRET       "3795425b-1f2f-41ac-a5ee-1dd586e9704f"
-#define DEVICE_ID_TV     "694fcd90729a4887d7eb6d8d"
-#define DEVICE_ID_SP     "694fce3c00f870dd77d668e0"
-#define DEVICE_ID_PC     "694fcde100f870dd77d66876"
-
-// ================== PIN 設定 ==================
-#define PIN_TV             18
-#define PIN_SPEAKER        4
-#define PIN_LED            17    
-#define PIN_MIC            34
-#define PIN_LDR            35
-#define PIN_POT            32
-#define PIN_BUTTON_MAIN    13
-#define PIN_TRIGGER_AUDIO  4
-#define PIN_BUTTON_AUDIO   14
-#define PIN_RELAY_PC       15
-#define PIN_IR_SEND        25
-#define PIN_IR_RECV        26
-
-// ================== 矩陣與顯示設定 ==================
-#define LED_COUNT          420
-#define MATRIX_ROWS        12
-#define MATRIX_COLS        35
-
-CRGB leds[LED_COUNT];
-NeoPixelBus<NeoGrbFeature, NeoEsp32I2s1800KbpsMethod> strip(LED_COUNT, PIN_LED);
-
-#define BRIGHTNESS_MIN     10
-#define BRIGHTNESS_MAX     80
-
-enum DisplayMode { MODE_CLOCK, MODE_AUDIO, MODE_TRANSITION };
-DisplayMode currentMode = MODE_CLOCK;
-DisplayMode nextMode = MODE_CLOCK;
-
-// ================== 全域變數 ==================
-uint8_t clockR = 255, clockG = 255, clockB = 255;
-float sensLow = 1.0, sensMid = 1.0, sensHigh = 1.0, globalSens = 1.5;
-int audioStyle = 0;    
-int currentBrightness = 30;
-
-// ================== FFT 設定 ==================
-#define FFT_SAMPLES 128
-#define FFT_SAMPLING_FREQ 10000
-double vReal[FFT_SAMPLES];
-double vImag[FFT_SAMPLES];
-arduinoFFT FFT = arduinoFFT(vReal, vImag, FFT_SAMPLES, FFT_SAMPLING_FREQ);
-int bands[MATRIX_COLS];
-int peaks[MATRIX_COLS]; 
-
-// ================== 物件初始化 ==================
-WiFiClient espClient;
-PubSubClient mqttClient(espClient);
-IRsend irsend(PIN_IR_SEND);
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org", 28800, 60000);
-
-// ================== 時間與防彈跳變數 ==================
-uint16_t dissolveOrder[LED_COUNT];
-int dissolveIndex = 0;
-unsigned long lastDisplayUpdate = 0;
-unsigned long lastPeakDrop = 0;
-
-// 喇叭觸發變數
-int actualTriggerState = HIGH;  
-int lastFlickerState = HIGH;    
-unsigned long lastDebounceTime = 0; 
-
-// 按鈕觸發變數
-bool lastBtnMain = HIGH;
-bool lastBtnAudio = HIGH;
-unsigned long lastBtnTime = 0;
-
-unsigned long lastMqttRetry = 0;
-
-// ================== 字型資料 ==================
-const uint16_t digits[10][12] = {
-  {0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b1000001, 0b0100010, 0b0011100},
-  {0b0001000, 0b0011000, 0b0101000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0001000, 0b0111110},
-  {0b0011100, 0b0100010, 0b1000001, 0b0000001, 0b0000010, 0b0000100, 0b0001000, 0b0010000, 0b0100000, 0b1000000, 0b1000010, 0b1111100},
-  {0b0011100, 0b0100010, 0b1000001, 0b0000001, 0b0000010, 0b0001100, 0b0000010, 0b0000001, 0b0000001, 0b1000001, 0b0100010, 0b0011100},
-  {0b0000100, 0b0001100, 0b0010100, 0b0100100, 0b1000100, 0b1000100, 0b1111110, 0b0000100, 0b0000100, 0b0000100, 0b0000100, 0b0001110},
-  {0b0111110, 0b1000000, 0b1000000, 0b1000000, 0b1111100, 0b0000010, 0b0000001, 0b0000001, 0b0000001, 0b1000001, 0b0100010, 0b0011100},
-  {0b0011100, 0b0100010, 0b1000000, 0b1000000, 0b1000000, 0b1111100, 0b1000010, 0b1000001, 0b1000001, 0b1000001, 0b0100010, 0b0011100},
-  {0b1111110, 0b0000010, 0b0000100, 0b0000100, 0b0001000, 0b0001000, 0b0010000, 0b0010000, 0b0100000, 0b0100000, 0b0100000, 0b0100000},
-  {0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b0100010, 0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b1000001, 0b0100010, 0b0011100},
-  {0b0011100, 0b0100010, 0b1000001, 0b1000001, 0b1000001, 0b0100011, 0b0011110, 0b0000001, 0b0000001, 0b1000001, 0b0100010, 0b0011100}
-};
-const uint8_t smallDigits[10][5] = {
-  {0b111, 0b101, 0b101, 0b101, 0b111}, {0b010, 0b110, 0b010, 0b010, 0b111},
-  {0b111, 0b001, 0b111, 0b100, 0b111}, {0b111, 0b001, 0b111, 0b001, 0b111},
-  {0b101, 0b101, 0b111, 0b001, 0b001}, {0b111, 0b100, 0b111, 0b001, 0b111},
-  {0b111, 0b100, 0b111, 0b101, 0b111}, {0b111, 0b001, 0b010, 0b100, 0b100},
-  {0b111, 0b101, 0b111, 0b101, 0b111}, {0b111, 0b101, 0b111, 0b001, 0b111}
-};
-
-// ================== 輔助函式 ==================
-uint16_t XY(uint8_t x, uint8_t y) {
-  bool flipX = false;  
-  bool flipY = true;  
-
-  if (flipX) x = (MATRIX_COLS - 1) - x;
-  if (flipY) y = (MATRIX_ROWS - 1) - y;
-
-  uint16_t i;
-  if (y & 0x01) {
-    uint8_t reverseX = (MATRIX_COLS - 1) - x;
-    i = (y * MATRIX_COLS) + reverseX;
-  } else {
-    i = (y * MATRIX_COLS) + x;
-  }
-  return (i < LED_COUNT) ? i : 0;
-}
-
-void updateLEDs() {
-  for (uint16_t i = 0; i < LED_COUNT; i++) {
-    uint8_t r = scale8(leds[i].r, currentBrightness);
-    uint8_t g = scale8(leds[i].g, currentBrightness);
-    uint8_t b = scale8(leds[i].b, currentBrightness);
-    strip.SetPixelColor(i, RgbColor(r, g, b));
-  }
-  strip.Show(); 
-}
-
-void initDissolveArray() {
-  for (uint16_t i = 0; i < LED_COUNT; i++) dissolveOrder[i] = i;
-  for (uint16_t i = LED_COUNT - 1; i > 0; i--) {
-    uint16_t j = random(i + 1);
-    uint16_t temp = dissolveOrder[i];
-    dissolveOrder[i] = dissolveOrder[j];
-    dissolveOrder[j] = temp;
-  }
-}
-
-void triggerTransition(DisplayMode targetMode) {
-  if (currentMode != targetMode && currentMode != MODE_TRANSITION) {
-    nextMode = targetMode;
-    currentMode = MODE_TRANSITION;
-    dissolveIndex = 0;
-    initDissolveArray();
-  }
-}
-
-void drawPixelSafe(int x, int y, CRGB color) {
-  if (x >= 0 && x < MATRIX_COLS && y >= 0 && y < MATRIX_ROWS) {
-    leds[XY(x, y)] = color;
-  }
-}
-
-void drawLargeDigit(int startX, int startY, int digit, CRGB color) {
-  for (int y = 0; y < 12; y++) {
-    for (int x = 0; x < 7; x++) {
-      if (digits[digit][y] & (1 << (6 - x))) {
-        drawPixelSafe(startX + x, startY + y, color);
-      }
-    }
-  }
-}
-
-void drawSmallDigit(int startX, int startY, int digit, CRGB color) {
-  for (int y = 0; y < 5; y++) {
-    for (int x = 0; x < 3; x++) {
-      if (smallDigits[digit][y] & (1 << (2 - x))) { 
-        drawPixelSafe(startX + x, startY + y, color); 
-      }
-    }
-  }
-}
-
-void renderLargeClock(CRGB color) {
-  int h = timeClient.getHours();
-  int m = timeClient.getMinutes();
-  int h1 = h / 10, h2 = h % 10;
-  int m1 = m / 10, m2 = m % 10;
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CyberPixel Dashboard</title>
   
-  int x = 0; int y = 0;
-  drawLargeDigit(x, y, h1, color); x += 8;
-  drawLargeDigit(x, y, h2, color); x += 8;
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   
-  if ((millis() / 500) % 2 == 0) {
-    drawPixelSafe(x, 3, color); drawPixelSafe(x+1, 3, color);
-    drawPixelSafe(x, 4, color); drawPixelSafe(x+1, 4, color);
-    drawPixelSafe(x, 7, color); drawPixelSafe(x+1, 7, color);
-    drawPixelSafe(x, 8, color); drawPixelSafe(x+1, 8, color);
-  }
-  x += 3;
-  drawLargeDigit(x, y, m1, color); x += 8;
-  drawLargeDigit(x, y, m2, color);
-}
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 15px; background-color: #0a0a0a; color: #e0e0e0; min-height: 100vh; display: flex; flex-direction: column; }
+    h2 { text-align: center; color: #00d2ff; text-shadow: 0 0 15px rgba(0, 210, 255, 0.5); margin: 10px 0 25px 0; font-size: 28px; letter-spacing: 2px; }
+    .container { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; width: 100%; max-width: 100%; flex-grow: 1; }
+    .card { background: #1e1e1e; padding: 25px; border-radius: 15px; box-shadow: 0 8px 25px rgba(0,0,0,0.6); border: 1px solid #333; display: flex; flex-direction: column; }
+    h3 { margin-top: 0; color: #aaa; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1.5px; border-bottom: 1px solid #333; padding-bottom: 10px; margin-bottom: 20px;}
+    .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; height: 100%; }
+    .status-box { background: #252525; padding: 20px 10px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: all 0.3s; border: 1px solid #2a2a2a; }
+    .status-icon { font-size: 32px; margin-bottom: 12px; color: #555; }
+    .status-text { font-size: 16px; color: #777; font-weight: bold; }
+    .active { background: #1a2e1a; border-color: #00ff00; box-shadow: inset 0 0 15px rgba(0,255,0,0.1); }
+    .active .status-icon { color: #00ff00; text-shadow: 0 0 10px #00ff00; }
+    .active .status-text { color: #00ff00; }
+    #connection-status { text-align: center; color: #ff4b2b; font-weight: bold; margin-bottom: 15px; }
+    .connected { color: #00ff00 !important; }
+    .pc-btn { width: 100%; height: 100%; min-height: 80px; background: linear-gradient(135deg, #ff416c, #ff4b2b); color: white; border: none; border-radius: 12px; font-size: 22px; font-weight: bold; cursor: pointer; box-shadow: 0 0 20px rgba(255, 75, 43, 0.4); transition: transform 0.1s; display: flex; align-items: center; justify-content: center; gap: 10px; }
+    .pc-btn:active { transform: scale(0.96); }
+    #color-picker-container { display: flex; justify-content: center; align-items: center; flex-grow: 1; padding: 10px 0;}
+    .slider-group { margin-bottom: 15px; }
+    .slider-group label { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: bold; color: #ccc;}
+    input[type=range] { width: 100%; height: 8px; background: #333; border-radius: 5px; outline: none; -webkit-appearance: none; accent-color: #00d2ff; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #00d2ff; cursor: pointer; }
+    .ir-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+    .ir-btn { background: #2c2c2c; color: white; border: 1px solid #444; font-size: 16px; padding: 15px; border-radius: 10px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .ir-btn:hover { background: #3c3c3c; border-color: #00d2ff; box-shadow: 0 0 10px rgba(0,210,255,0.2); }
+    .style-title { color: #888; font-size: 14px; margin: 5px 0 15px 0; border-top: 1px solid #444; padding-top: 15px; text-align: center;}
+  </style>
+</head>
+<body>
 
-void overlaySmallClock(int hours, int minutes, CRGB color) {
-  int h1 = hours / 10, h2 = hours % 10;
-  int m1 = minutes / 10, m2 = minutes % 10;
-  int x = 17, y = 0;  
+  <h2><i class="fas fa-microchip"></i> CyberPixel Dashboard</h2>
+  <div id="connection-status"><i class="fas fa-spinner fa-spin"></i> 正在連線到控制中心...</div>
 
-  if (h1 > 0) drawSmallDigit(x, y, h1, color); 
-  x += 4; drawSmallDigit(x, y, h2, color); x += 4;
-  
-  if ((millis() / 500) % 2 == 0) { 
-    drawPixelSafe(x, y + 1, color); drawPixelSafe(x, y + 3, color);
-  }
-  x += 2; 
-  drawSmallDigit(x, y, m1, color); x += 4;
-  drawSmallDigit(x, y, m2, color);
-}
+  <div class="container">
+    <div class="card">
+      <h3><i class="fas fa-satellite-dish"></i> Device Status</h3>
+      <div class="status-grid">
+        <div class="status-box" id="status-tv"><i class="fas fa-tv status-icon"></i><span class="status-text">TV: OFF</span></div>
+        <div class="status-box" id="status-speaker"><i class="fas fa-volume-up status-icon"></i><span class="status-text">Speaker: OFF</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-desktop"></i> PC Power</h3>
+      <button class="pc-btn" onclick="triggerPC()"><i class="fas fa-power-off"></i> Wake PC</button>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-palette"></i> Matrix Color</h3>
+      <div id="color-picker-container"></div>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-sliders-h"></i> EQ Sensitivity</h3>
+      <div class="slider-group"><label><span>高音 (Treble)</span><span id="valHigh" style="color:#00d2ff">1.0</span></label><input type="range" min="0.1" max="3.0" step="0.1" value="1.0" oninput="document.getElementById('valHigh').innerText=this.value" onchange="sendSens('high', this.value)"></div>
+      <div class="slider-group"><label><span>中音 (Mid)</span><span id="valMid" style="color:#00d2ff">1.0</span></label><input type="range" min="0.1" max="3.0" step="0.1" value="1.0" oninput="document.getElementById('valMid').innerText=this.value" onchange="sendSens('mid', this.value)"></div>
+      <div class="slider-group"><label><span>低音 (Bass)</span><span id="valLow" style="color:#00d2ff">1.0</span></label><input type="range" min="0.1" max="3.0" step="0.1" value="1.0" oninput="document.getElementById('valLow').innerText=this.value" onchange="sendSens('low', this.value)"></div>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-gamepad"></i> Control & Visuals</h3>
+      <div class="ir-grid">
+        <button class="ir-btn" onclick="sendIR('tv_power')"><i class="fas fa-tv"></i> TV Pwr</button>
+        <button class="ir-btn" onclick="sendIR('sp_power')"><i class="fas fa-volume-up"></i> SPK Pwr</button>
+      </div>
+      <div class="style-title"><i class="fas fa-music"></i> 音頻動畫樣式 (Audio Styles)</div>
+      <div class="ir-grid">
+        <button class="ir-btn" onclick="sendStyle(0)">🌈 經典漸層</button>
+        <button class="ir-btn" onclick="sendStyle(1)">☄️ 峰值掉落</button>
+        <button class="ir-btn" onclick="sendStyle(2)">🪞 中心對稱</button>
+        <button class="ir-btn" onclick="sendStyle(3)">💨 音浪擴散</button>
+      </div>
+    </div>
+  </div>
 
-void processAudio() {
-  unsigned long sampling_period_us = round(1000000 * (1.0 / FFT_SAMPLING_FREQ));
-  for (int i = 0; i < FFT_SAMPLES; i++) {
-    unsigned long newTime = micros();
-    int rawValue = analogRead(PIN_MIC) - 1700; 
-    vReal[i] = rawValue;
-    vImag[i] = 0;
-    while ((micros() - newTime) < sampling_period_us) { }
-  }
+  <script>
+    // 🚀 改回最穩定的 HiveMQ WSS (Port 8884)
+    const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
+    const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', { clientId: clientId });
+    const statusEl = document.getElementById('connection-status');
 
-  FFT.Windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
-  FFT.Compute(FFT_FORWARD);
-  FFT.ComplexToMagnitude();
+    client.on('connect', function () {
+      console.log('MQTT Connected!');
+      statusEl.innerHTML = '<i class="fas fa-check-circle"></i> 系統已連線';
+      statusEl.classList.add('connected');
+      client.subscribe("esp32/status/tv");
+      client.subscribe("esp32/status/speaker");
+    });
 
-  for (int i = 0; i < MATRIX_COLS; i++) {
-    int binNum = map(i, 0, MATRIX_COLS - 1, 2, 40); 
-    float amplitude = vReal[binNum];
+    client.on('offline', function () {
+      statusEl.innerHTML = '<i class="fas fa-exclamation-triangle"></i> 連線中斷，重新連線中...';
+      statusEl.classList.remove('connected');
+    });
 
-    if (i < 10) amplitude *= sensLow;
-    else if (i < 25) amplitude *= sensMid;
-    else amplitude *= sensHigh;
-    
-    int ledHeight = map(amplitude * globalSens, 0, 1000, 0, MATRIX_ROWS);
-    if (ledHeight <= 1) ledHeight = 0; 
-    
-    if (ledHeight < 0) ledHeight = 0;
-    if (ledHeight > MATRIX_ROWS) ledHeight = MATRIX_ROWS;
-    bands[i] = ledHeight;
+    client.on('message', function (topic, message) {
+      const msg = message.toString();
+      if (topic === "esp32/status/tv") updateStatusUI('status-tv', msg === '1' || msg === 'ON');
+      else if (topic === "esp32/status/speaker") updateStatusUI('status-speaker', msg === '1' || msg === 'ON');
+    });
 
-    if (bands[i] >= peaks[i]) peaks[i] = bands[i];
-  }
-}
-
-void renderAudioVisualizer(int style) {
-  memset(leds, 0, sizeof(leds)); 
-  processAudio();
-  uint8_t baseHue = millis() / 30; 
-
-  if (millis() - lastPeakDrop > 80) {
-    for (int i = 0; i < MATRIX_COLS; i++) {
-      if (peaks[i] > 0) peaks[i]--;
-    }
-    lastPeakDrop = millis();
-  }
-
-  for (int x = 0; x < MATRIX_COLS; x++) {
-    int h = bands[x];
-    switch (style) {
-      case 0:
-        for (int y = 0; y < h; y++) drawPixelSafe(x, MATRIX_ROWS - 1 - y, CHSV(baseHue + x * 5 + y * 10, 255, 255));
-        break;
-      case 1:
-        for (int y = 0; y < h; y++) drawPixelSafe(x, MATRIX_ROWS - 1 - y, CHSV(baseHue + x * 5 + y * 10, 255, 200));
-        if (peaks[x] > 0 && peaks[x] < MATRIX_ROWS) drawPixelSafe(x, MATRIX_ROWS - 1 - peaks[x], CRGB::White);
-        break;
-      case 2:
-        for (int y = 0; y < h / 2; y++) {
-          CRGB col = CHSV(baseHue + x * 5 + y * 15, 255, 255);
-          drawPixelSafe(x, 5 - y, col); drawPixelSafe(x, 6 + y, col); 
-        }
-        break;
-      case 3:
-        for (int y = 0; y < h; y++) {
-          int brightness = map(y, 0, h, 255, 50);
-          drawPixelSafe(x, MATRIX_ROWS - 1 - y, CHSV(baseHue + x * 8, 200, brightness));
-        }
-        fadeToBlackBy(leds, LED_COUNT, 40); 
-        break;
-    }
-  }
-}
-
-// ================== Sinric Pro 回呼 ==================
-bool onPowerStatePC(const String &deviceId, bool &state) {
-  if (state) {
-    digitalWrite(PIN_RELAY_PC, HIGH);
-    delay(500); 
-    digitalWrite(PIN_RELAY_PC, LOW);
-  }
-  return true; 
-}
-
-bool onPowerStateTV(const String &deviceId, bool &state) {
-  irsend.sendNEC(0x20DF10EF, 32); 
-  if (state) mqttClient.publish("esp32/status/tv", "ON");
-  else mqttClient.publish("esp32/status/tv", "OFF");
-  return true;
-}
-
-bool onPowerStateSpeaker(const String &deviceId, bool &state) {
-  irsend.sendSony(0xA90, 12);     
-  if (state) mqttClient.publish("esp32/status/speaker", "ON");
-  else mqttClient.publish("esp32/status/speaker", "OFF");
-  return true;
-}
-
-// ================== MQTT 回呼與連線 ==================
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  String message = "";
-  for (int i = 0; i < length; i++) message += (char)payload[i];
-  String t = String(topic);
-  
-  if (t == "esp32/color/r") clockR = message.toInt();
-  if (t == "esp32/color/g") clockG = message.toInt();
-  if (t == "esp32/color/b") clockB = message.toInt();
-  if (t == "esp32/sens/low") sensLow = message.toFloat();
-  if (t == "esp32/sens/mid") sensMid = message.toFloat();
-  if (t == "esp32/sens/high") sensHigh = message.toFloat();
-  
-  if (t == "esp32/audio/style") {
-    audioStyle = message.toInt();
-    triggerTransition(MODE_AUDIO);
-  }
-  
-  if (t == "esp32/control/pc" && message == "ON") {
-     digitalWrite(PIN_RELAY_PC, HIGH);
-     delay(500);
-     digitalWrite(PIN_RELAY_PC, LOW);
-  }
-  if (t == "esp32/control/ir") {
-     if (message == "tv_power") irsend.sendNEC(0x20DF10EF, 32); 
-     if (message == "sp_power") irsend.sendSony(0xA90, 12);     
-  }
-}
-
-void reconnectMQTT() {
-  if (!mqttClient.connected() && (millis() - lastMqttRetry > 5000)) {
-    Serial.print("嘗試連線 MQTT...");
-    String clientId = "CyberClock_ESP32_" + String(random(0xffff), HEX);
-    if (mqttClient.connect(clientId.c_str())) {
-      Serial.println("連線成功！");
-      mqttClient.subscribe("esp32/color/#");
-      mqttClient.subscribe("esp32/sens/#");
-      mqttClient.subscribe("esp32/audio/style");
-      mqttClient.subscribe("esp32/control/#");
-    }
-    lastMqttRetry = millis();
-  }
-}
-
-// ================== Setup ==================
-void setup() {
-  Serial.begin(115200);
-  
-  pinMode(PIN_RELAY_PC, OUTPUT);
-  digitalWrite(PIN_RELAY_PC, LOW);
-  
-  pinMode(PIN_TRIGGER_AUDIO, INPUT_PULLDOWN);
-  pinMode(PIN_BUTTON_MAIN, INPUT_PULLDOWN);
-  pinMode(PIN_BUTTON_AUDIO, INPUT_PULLDOWN);
-  
-  pinMode(PIN_POT, INPUT);
-  pinMode(PIN_LDR, INPUT);
-  
-  strip.Begin();
-  strip.Show();
-
-  irsend.begin();
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) delay(500);
-  timeClient.begin();
-  
-  mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-  mqttClient.setCallback(mqttCallback);
-
-  SinricProSwitch& myPC = SinricPro[DEVICE_ID_PC];
-  myPC.onPowerState(onPowerStatePC);
-  SinricProSwitch& myTV = SinricPro[DEVICE_ID_TV];
-  myTV.onPowerState(onPowerStateTV);
-  SinricProSwitch& mySpeaker = SinricPro[DEVICE_ID_SP];
-  mySpeaker.onPowerState(onPowerStateSpeaker);
-  SinricPro.begin(APP_KEY, APP_SECRET);
-}
-
-// ================== 主迴圈 ==================
-void loop() {
-  SinricPro.handle();
-  if (!mqttClient.connected()) reconnectMQTT();
-  mqttClient.loop(); 
-  timeClient.update();
-
-  int potValue = analogRead(PIN_POT);
-  currentBrightness = map(potValue, 0, 4095, BRIGHTNESS_MIN, BRIGHTNESS_MAX);
-
-  // ==========================================
-  // 🚀 1. 實體按鈕讀取 (b接點: 按下斷開從 HIGH 變 LOW)
-  // ==========================================
-  bool btnMain = digitalRead(PIN_BUTTON_MAIN);
-  bool btnAudio = digitalRead(PIN_BUTTON_AUDIO);
-
-  if (millis() - lastBtnTime > 50) { // 50ms 按鈕防彈跳
-    
-    // 主按鈕：按下觸發電腦開機
-    if (btnMain == LOW && lastBtnMain == HIGH) {
-      digitalWrite(PIN_RELAY_PC, HIGH);
-      delay(500);
-      digitalWrite(PIN_RELAY_PC, LOW);
-      lastBtnTime = millis();
-    }
-
-    // 副按鈕：按下切換音頻樣式 (0->1->2->3->0 循環)
-    if (btnAudio == LOW && lastBtnAudio == HIGH) {
-      audioStyle = (audioStyle + 1) % 4;
-      triggerTransition(MODE_AUDIO);
-      // 同步把狀態回傳給網頁
-      mqttClient.publish("esp32/audio/style", String(audioStyle).c_str());
-      lastBtnTime = millis();
-    }
-  }
-  lastBtnMain = btnMain;
-  lastBtnAudio = btnAudio;
-
-  // ==========================================
-  // 🚀 2. 喇叭自動切換邏輯 (已修正邏輯顛倒問題)
-  // ==========================================
-  int reading = digitalRead(PIN_TRIGGER_AUDIO);
-  if (reading != lastFlickerState) {
-    lastDebounceTime = millis(); 
-  }
-  if ((millis() - lastDebounceTime) > 300) {
-    if (reading != actualTriggerState) {
-      actualTriggerState = reading; 
-      
-      // 🚀 邏輯反轉修正：HIGH 時進音頻模式，LOW 時回時鐘模式
-      if (actualTriggerState == HIGH) {
-        triggerTransition(MODE_AUDIO); 
+    function updateStatusUI(elementId, isOn) {
+      const el = document.getElementById(elementId);
+      const textSpan = el.querySelector('.status-text');
+      if (isOn) {
+        el.classList.add('active');
+        textSpan.innerText = textSpan.innerText.split(':')[0] + ": ON";
       } else {
-        triggerTransition(MODE_CLOCK); 
+        el.classList.remove('active');
+        textSpan.innerText = textSpan.innerText.split(':')[0] + ": OFF";
       }
     }
-  }
-  lastFlickerState = reading; 
 
-  // ==========================================
-  // 🚀 3. 畫面更新
-  // ==========================================
-  if (millis() - lastDisplayUpdate > 30) {
-    CRGB mainColor = CRGB(clockR, clockG, clockB);
+    var pickerWidth = window.innerWidth < 400 ? 200 : 250;
+    var colorPicker = new iro.ColorPicker("#color-picker-container", {
+      width: pickerWidth, color: "#ffffff",
+      layout: [
+        { component: iro.ui.Wheel },
+        { component: iro.ui.Slider, options: { sliderType: 'value', margin: 25 } }
+      ]
+    });
 
-    switch (currentMode) {
-      case MODE_CLOCK:
-        memset(leds, 0, sizeof(leds));
-        renderLargeClock(mainColor);
-        updateLEDs();
-        break;
+    colorPicker.on('input:end', function(color) {
+      const rgb = color.rgb;
+      client.publish("esp32/color/r", rgb.r.toString());
+      client.publish("esp32/color/g", rgb.g.toString());
+      client.publish("esp32/color/b", rgb.b.toString());
+    });
 
-      case MODE_AUDIO:
-        renderAudioVisualizer(audioStyle);
-        overlaySmallClock(timeClient.getHours(), timeClient.getMinutes(), mainColor);
-        updateLEDs();
-        break;
-
-      case MODE_TRANSITION:
-        for (int i = 0; i < 15; i++) {
-          if (dissolveIndex < LED_COUNT) {
-            leds[dissolveOrder[dissolveIndex]] = CRGB::Black;
-            dissolveIndex++;
-          }
-        }
-        updateLEDs();
-        if (dissolveIndex >= LED_COUNT) {
-          memset(leds, 0, sizeof(leds));
-          currentMode = nextMode;
-        }
-        break;
-    }
-    lastDisplayUpdate = millis();
-  }
-}
+    function triggerPC() { if(confirm("確定要喚醒電腦嗎？")) client.publish("esp32/control/pc", "ON"); }
+    function sendSens(band, value) { client.publish('esp32/sens/' + band, value.toString()); }
+    function sendStyle(styleNum) { client.publish('esp32/audio/style', styleNum.toString()); }
+    function sendIR(command) { client.publish("esp32/control/ir", command); }
+  </script>
+</body>
+</html>
