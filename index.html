@@ -82,7 +82,7 @@
   </div>
 
   <script>
-    // 🚀 改回最穩定的 HiveMQ WSS (Port 8884)
+    // 使用 HiveMQ 的加密 WSS 通道
     const clientId = 'web_' + Math.random().toString(16).substr(2, 8);
     const client = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', { clientId: clientId });
     const statusEl = document.getElementById('connection-status');
@@ -93,6 +93,9 @@
       statusEl.classList.add('connected');
       client.subscribe("esp32/status/tv");
       client.subscribe("esp32/status/speaker");
+      
+      // 🚀 新增：連線成功後，立刻向 ESP32 發出「索取當前狀態」的請求
+      client.publish("esp32/status/request", "GET");
     });
 
     client.on('offline', function () {
